@@ -1495,13 +1495,24 @@ const _maybeAutoselectNewestConversation = (
   }
 
   // If we got here we're auto selecting the newest convo
-  const meta = state.chat2.metaMap.maxBy(
+  let meta = state.chat2.metaMap.maxBy(
     meta =>
       meta.teamType !== 'big' &&
       (action.type !== TeamsGen.leaveTeam || meta.teamname !== action.payload.teamname)
         ? meta.timestamp
         : 0
   )
+
+  // If we attempt to block a conversation that is the most recent conversation, we end up re-selecting it,
+  // which causes the thread to display the blocked conversation.
+  // If there is only one conversation and the user blocks it, that thread will be stuck on the screen with
+  // no way to remove it.
+  // So if the newest conversation is the currently selected one, choose the second newest instead.
+  // If there isn't a second newest, this will be an empty metaMap and then we
+  // clear the selection and show nothing (which is correct)
+  if (meta && action.type === Chat2Gen.blockConversation && meta.conversationIDKey === selected) {
+    meta = state.chat2.metaMap.filter(m => m.conversationIDKey !== selected).maxBy(m => m.timestamp)
+  }
 
   if (meta) {
     return Saga.put(
@@ -2042,7 +2053,10 @@ const updateNotificationSettings = (action: Chat2Gen.UpdateNotificationSettingsP
 
 const blockConversation = (action: Chat2Gen.BlockConversationPayload) =>
   Saga.sequentially([
-    Saga.put(Chat2Gen.createNavigateToInbox({findNewConversation: true})),
+    // Route to the inbox, but don't try to select a new converation because that's handled by
+    // takeSafeEveryPure : actions -> changeSelectedConversation
+    // which will be fired first.
+    Saga.put(Chat2Gen.createNavigateToInbox({findNewConversation: false})),
     Saga.call(RPCChatTypes.localSetConversationStatusLocalRpcPromise, {
       conversationID: Types.keyToConversationID(action.payload.conversationIDKey),
       identifyBehavior: RPCTypes.tlfKeysTLFIdentifyBehavior.chatGui,
